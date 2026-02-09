@@ -3,11 +3,8 @@ import numpy as np
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from sklearn.neighbors import NearestNeighbors
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    Text2TextGenerationPipeline
-)
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+import torch
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -55,7 +52,7 @@ st.markdown("<h1 style='text-align:center;'>⚖️ Legal AI – Speech Enabled Q
 st.markdown("<p style='text-align:center;'>PDF RAG • Voice Input • Streamlit Cloud Safe</p>", unsafe_allow_html=True)
 
 # --------------------------------------------------
-# LOAD MODELS (CLOUD SAFE)
+# LOAD MODELS (100% SAFE)
 # --------------------------------------------------
 @st.cache_resource
 def load_embedder():
@@ -65,15 +62,11 @@ def load_embedder():
 def load_llm():
     tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
     model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
-
-    return Text2TextGenerationPipeline(
-        model=model,
-        tokenizer=tokenizer,
-        max_new_tokens=300
-    )
+    model.eval()
+    return tokenizer, model
 
 embedder = load_embedder()
-llm = load_llm()
+tokenizer, model = load_llm()
 
 # --------------------------------------------------
 # SIDEBAR
@@ -101,13 +94,11 @@ def split_text(text, size=800, overlap=150):
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def build_index(files):
-    texts = []
-    sources = []
+    texts, sources = [], []
 
     for f in files:
         reader = PdfReader(f)
         full_text = ""
-
         for page in reader.pages:
             txt = page.extract_text()
             if txt:
@@ -124,13 +115,13 @@ def build_index(files):
     return nn, texts, sources
 
 # --------------------------------------------------
-# BROWSER SPEECH (NO PYTHON LIBS)
+# BROWSER SPEECH (CLOUD SAFE)
 # --------------------------------------------------
 st.markdown("""
 <script>
 function startDictation() {
     if (!('webkitSpeechRecognition' in window)) {
-        alert("Speech recognition not supported in this browser");
+        alert("Speech recognition not supported");
         return;
     }
     const r = new webkitSpeechRecognition();
@@ -176,7 +167,15 @@ if files:
                 f"Context:\n{context}\n\nQuestion:\n{question}"
             )
 
-            answer = llm(prompt)[0]["generated_text"]
+            inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
+            with torch.no_grad():
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=300,
+                    temperature=0.7
+                )
+
+            answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
 
         st.session_state.chat.append((question, answer, idxs[0]))
 
@@ -185,8 +184,7 @@ if files:
         st.markdown(f"<div class='user'><b>Q:</b> {q}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='bot'>{a}</div>", unsafe_allow_html=True)
 
-        srcs = set([sources[i] for i in idxs])
-        for s in srcs:
+        for s in set(sources[i] for i in idxs):
             st.markdown(f"<div class='source'>Source: {s}</div>", unsafe_allow_html=True)
 
         st.markdown(
