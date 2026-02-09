@@ -1,9 +1,13 @@
-﻿import streamlit as st
+import streamlit as st
 import numpy as np
 from pypdf import PdfReader
 from sentence_transformers import SentenceTransformer
 from sklearn.neighbors import NearestNeighbors
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    Text2TextGenerationPipeline
+)
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -48,10 +52,10 @@ footer { visibility:hidden; }
 # HEADER
 # --------------------------------------------------
 st.markdown("<h1 style='text-align:center;'>⚖️ Legal AI – Speech Enabled Q&A</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;'>AI Answers • Voice Input • Streamlit Cloud Safe</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>PDF RAG • Voice Input • Streamlit Cloud Safe</p>", unsafe_allow_html=True)
 
 # --------------------------------------------------
-# LOAD MODELS
+# LOAD MODELS (CLOUD SAFE)
 # --------------------------------------------------
 @st.cache_resource
 def load_embedder():
@@ -61,7 +65,12 @@ def load_embedder():
 def load_llm():
     tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
     model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
-    return pipeline("text2text-generation", model=model, tokenizer=tokenizer, max_new_tokens=300)
+
+    return Text2TextGenerationPipeline(
+        model=model,
+        tokenizer=tokenizer,
+        max_new_tokens=300
+    )
 
 embedder = load_embedder()
 llm = load_llm()
@@ -70,31 +79,39 @@ llm = load_llm()
 # SIDEBAR
 # --------------------------------------------------
 st.sidebar.header("📂 Upload Legal PDFs")
-files = st.sidebar.file_uploader("PDF only", type=["pdf"], accept_multiple_files=True)
+files = st.sidebar.file_uploader(
+    "Upload one or more PDF files",
+    type=["pdf"],
+    accept_multiple_files=True
+)
 
 # --------------------------------------------------
 # TEXT SPLITTER
 # --------------------------------------------------
 def split_text(text, size=800, overlap=150):
-    chunks, start = [], 0
+    chunks = []
+    start = 0
     while start < len(text):
-        chunks.append(text[start:start+size])
+        chunks.append(text[start:start + size])
         start += size - overlap
     return chunks
 
 # --------------------------------------------------
-# VECTOR SEARCH
+# VECTOR INDEX
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def build_index(files):
-    texts, sources = [], []
+    texts = []
+    sources = []
 
     for f in files:
         reader = PdfReader(f)
         full_text = ""
-        for p in reader.pages:
-            if p.extract_text():
-                full_text += p.extract_text()
+
+        for page in reader.pages:
+            txt = page.extract_text()
+            if txt:
+                full_text += txt
 
         chunks = split_text(full_text)
         texts.extend(chunks)
@@ -107,13 +124,13 @@ def build_index(files):
     return nn, texts, sources
 
 # --------------------------------------------------
-# BROWSER SPEECH + TTS
+# BROWSER SPEECH (NO PYTHON LIBS)
 # --------------------------------------------------
 st.markdown("""
 <script>
 function startDictation() {
     if (!('webkitSpeechRecognition' in window)) {
-        alert("Speech recognition not supported");
+        alert("Speech recognition not supported in this browser");
         return;
     }
     const r = new webkitSpeechRecognition();
@@ -123,6 +140,7 @@ function startDictation() {
     };
     r.start();
 }
+
 function speakText(text) {
     const msg = new SpeechSynthesisUtterance(text);
     msg.lang = "en-IN";
@@ -142,7 +160,10 @@ if files:
     with col1:
         question = st.text_input("Ask a legal question", key="speech_input")
     with col2:
-        st.markdown('<button class="btn" onclick="startDictation()">🎤 Speak</button>', unsafe_allow_html=True)
+        st.markdown(
+            '<button class="btn" onclick="startDictation()">🎤 Speak</button>',
+            unsafe_allow_html=True
+        )
 
     if question:
         with st.spinner("Analyzing legal documents..."):
@@ -150,14 +171,17 @@ if files:
             _, idxs = nn.kneighbors(q_emb)
 
             context = " ".join([texts[i] for i in idxs[0]])
-            prompt = f"Answer the legal question clearly.\n\nContext:\n{context}\n\nQuestion:\n{question}"
+            prompt = (
+                "Answer the legal question clearly and concisely.\n\n"
+                f"Context:\n{context}\n\nQuestion:\n{question}"
+            )
 
             answer = llm(prompt)[0]["generated_text"]
 
         st.session_state.chat.append((question, answer, idxs[0]))
 
-    # CHAT DISPLAY
-    for q, a, idxs in st.session_state.chat[::-1]:
+    # CHAT HISTORY
+    for q, a, idxs in reversed(st.session_state.chat):
         st.markdown(f"<div class='user'><b>Q:</b> {q}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='bot'>{a}</div>", unsafe_allow_html=True)
 
@@ -166,7 +190,7 @@ if files:
             st.markdown(f"<div class='source'>Source: {s}</div>", unsafe_allow_html=True)
 
         st.markdown(
-            f'<button class="btn" onclick="speakText(`{a[:2000]}`)">🔊 Read Answer</button>',
+            f'<button class="btn" onclick="speakText(`{a[:1500]}`)">🔊 Read Answer</button>',
             unsafe_allow_html=True
         )
 else:
