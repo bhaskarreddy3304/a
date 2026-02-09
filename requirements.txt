@@ -3,3 +3,6 @@ pypdf
 sentence-transformers
 faiss-cpu
 numpy
+scikit-learn
+torch
+transformers>=4.36.0
