@@ -1,6 +1,6 @@
 # ==========================================
 # LEGAL DOCUMENT ANALYSIS & Q&A USING RAG
-# STREAMLIT CLOUD – STABLE VERSION
+# STREAMLIT CLOUD – FINAL FIXED VERSION
 # ==========================================
 
 import streamlit as st
@@ -17,11 +17,16 @@ from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
 from langchain.embeddings.base import Embeddings
 
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSeq2SeqLM,
+    Text2TextGenerationPipeline
+)
+
 from sentence_transformers import SentenceTransformer
 
 # --------------------------------------------------
-# PAGE CONFIG (FAST LOAD)
+# PAGE CONFIG
 # --------------------------------------------------
 st.set_page_config(
     page_title="Legal AI – RAG",
@@ -36,7 +41,7 @@ if "chat" not in st.session_state:
     st.session_state.chat = []
 
 # --------------------------------------------------
-# UI STYLES (THEME SAFE)
+# UI STYLES
 # --------------------------------------------------
 st.markdown("""
 <style>
@@ -60,30 +65,20 @@ st.markdown("""
 # HEADER
 # --------------------------------------------------
 st.markdown("<h1 style='text-align:center;'>⚖️ Legal Document Analysis & Q&A</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Streamlit Cloud Safe)</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Cloud Stable)</p>", unsafe_allow_html=True)
 
 # --------------------------------------------------
 # SIDEBAR
 # --------------------------------------------------
 st.sidebar.header("📂 Upload Legal PDFs")
 files = st.sidebar.file_uploader(
-    "Upload one or more PDF files",
+    "Upload PDF files",
     type=["pdf"],
     accept_multiple_files=True
 )
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-### 🧠 Features
-✅ Multi-PDF Analysis  
-✅ Retrieval-Augmented Generation  
-✅ Legal Question Answering  
-✅ PDF Answer Download  
-✅ Cloud Stable Deployment  
-""")
-
 # --------------------------------------------------
-# EMBEDDINGS CLASS
+# EMBEDDINGS
 # --------------------------------------------------
 class HFEmbeddings(Embeddings):
     def __init__(self):
@@ -96,15 +91,14 @@ class HFEmbeddings(Embeddings):
         return self.model.encode([text])[0].tolist()
 
 # --------------------------------------------------
-# LOAD LLM (LAZY + CACHED)
+# LOAD LLM (SAFE FOR PYTHON 3.13)
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def load_llm():
     tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
     model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small")
 
-    pipe = pipeline(
-        "text2text-generation",
+    pipe = Text2TextGenerationPipeline(
         model=model,
         tokenizer=tokenizer,
         max_new_tokens=256
@@ -113,7 +107,7 @@ def load_llm():
     return HuggingFacePipeline(pipeline=pipe)
 
 # --------------------------------------------------
-# BUILD RAG PIPELINE (LAZY)
+# BUILD RAG PIPELINE
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def build_rag(chunks, meta):
@@ -131,26 +125,27 @@ def build_rag(chunks, meta):
     )
 
 # --------------------------------------------------
-# PDF REPORT GENERATION
+# PDF GENERATION
 # --------------------------------------------------
 def generate_pdf(question, answer):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4)
     styles = getSampleStyleSheet()
 
-    story = []
-    story.append(Paragraph("<b>LEGAL AI – GENERATED REPORT</b>", styles["Title"]))
-    story.append(Paragraph("<br/><b>Question:</b>", styles["Heading2"]))
-    story.append(Paragraph(question, styles["Normal"]))
-    story.append(Paragraph("<br/><b>Answer:</b>", styles["Heading2"]))
-    story.append(Paragraph(answer, styles["Normal"]))
+    story = [
+        Paragraph("<b>LEGAL AI REPORT</b>", styles["Title"]),
+        Paragraph("<br/><b>Question:</b>", styles["Heading2"]),
+        Paragraph(question, styles["Normal"]),
+        Paragraph("<br/><b>Answer:</b>", styles["Heading2"]),
+        Paragraph(answer, styles["Normal"]),
+    ]
 
     doc.build(story)
     buffer.seek(0)
     return buffer
 
 # --------------------------------------------------
-# MAIN APPLICATION
+# MAIN APP
 # --------------------------------------------------
 if files:
     texts, metas = [], []
@@ -181,7 +176,6 @@ if files:
     if question:
         with st.spinner("Analyzing legal documents..."):
             answer = qa(question)["result"]
-
         st.session_state.chat.append((question, answer))
 
     if st.session_state.chat:
@@ -193,12 +187,12 @@ if files:
 
         st.download_button(
             "📄 Download Answer as PDF",
-            data=generate_pdf(q, a),
-            file_name="Legal_AI_Report.pdf",
-            mime="application/pdf"
+            generate_pdf(q, a),
+            "Legal_AI_Report.pdf",
+            "application/pdf"
         )
 
         st.markdown("</div>", unsafe_allow_html=True)
 
 else:
-    st.info("📂 Upload legal PDF documents to start analysis.")
+    st.info("📂 Upload legal PDF documents to begin.")
