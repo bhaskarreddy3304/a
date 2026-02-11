@@ -1,6 +1,6 @@
 # ==========================================
 # LEGAL DOCUMENT ANALYSIS & Q&A USING RAG
-# STREAMLIT CLOUD – FINAL STABLE VERSION
+# FINAL STABLE STREAMLIT CLOUD VERSION
 # ==========================================
 
 import streamlit as st
@@ -10,11 +10,12 @@ from pypdf import PdfReader
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
-from langchain.chains.retrieval_qa.base import RetrievalQA
-from langchain_community.vectorstores import FAISS
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
 from langchain_community.llms import HuggingFaceEndpoint
 from langchain.embeddings.base import Embeddings
+from langchain.prompts import PromptTemplate
 
 from sentence_transformers import SentenceTransformer
 
@@ -34,7 +35,7 @@ if "chat" not in st.session_state:
     st.session_state.chat = []
 
 # --------------------------------------------------
-# UI STYLES
+# UI STYLES (THEME SAFE)
 # --------------------------------------------------
 st.markdown("""
 <style>
@@ -58,7 +59,7 @@ st.markdown("""
 # HEADER
 # --------------------------------------------------
 st.markdown("<h1 style='text-align:center;'>⚖️ Legal Document Analysis & Q&A</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Streamlit Cloud Stable)</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Cloud Stable)</p>", unsafe_allow_html=True)
 
 # --------------------------------------------------
 # SIDEBAR
@@ -84,20 +85,19 @@ class HFEmbeddings(Embeddings):
         return self.model.encode([text])[0].tolist()
 
 # --------------------------------------------------
-# LOAD LLM (NO TRANSFORMERS IMPORT ISSUES)
+# LOAD LLM (HUGGINGFACE API – NO PIPELINES)
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def load_llm():
-    return HuggingFacePipeline.from_model_id(
-        model_id="google/flan-t5-small",
-        task="text2text-generation",
-        pipeline_kwargs={
-            "max_new_tokens": 256
-        }
+    return HuggingFaceEndpoint(
+        repo_id="google/flan-t5-small",
+        huggingfacehub_api_token=st.secrets["HF_TOKEN"],
+        temperature=0.2,
+        max_new_tokens=256
     )
 
 # --------------------------------------------------
-# BUILD RAG PIPELINE
+# BUILD RAG PIPELINE (CUSTOM, STABLE)
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def build_rag(chunks, meta):
@@ -107,12 +107,38 @@ def build_rag(chunks, meta):
         meta
     )
 
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     llm = load_llm()
 
-    return RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=vectorstore.as_retriever()
+    prompt = PromptTemplate(
+        input_variables=["context", "question"],
+        template="""
+You are a legal assistant.
+Answer the question strictly using the given context.
+If the answer is not present, say "Not found in the provided documents."
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:
+"""
     )
+
+    def qa_function(question: str):
+        docs = retriever.get_relevant_documents(question)
+        context = "\n\n".join(d.page_content for d in docs)
+
+        final_prompt = prompt.format(
+            context=context,
+            question=question
+        )
+
+        return llm.invoke(final_prompt)
+
+    return qa_function
 
 # --------------------------------------------------
 # PDF GENERATION
@@ -135,7 +161,7 @@ def generate_pdf(question, answer):
     return buffer
 
 # --------------------------------------------------
-# MAIN APP
+# MAIN APPLICATION
 # --------------------------------------------------
 if files:
     texts, metas = [], []
@@ -165,7 +191,7 @@ if files:
 
     if question:
         with st.spinner("Analyzing legal documents..."):
-            answer = qa(question)["result"]
+            answer = qa(question)
         st.session_state.chat.append((question, answer))
 
     if st.session_state.chat:
@@ -177,9 +203,9 @@ if files:
 
         st.download_button(
             "📄 Download Answer as PDF",
-            generate_pdf(q, a),
-            "Legal_AI_Report.pdf",
-            "application/pdf"
+            data=generate_pdf(q, a),
+            file_name="Legal_AI_Report.pdf",
+            mime="application/pdf"
         )
 
         st.markdown("</div>", unsafe_allow_html=True)
