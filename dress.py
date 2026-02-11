@@ -1,5 +1,5 @@
 # ==========================================
-# LEGAL AI – CLOUD SAFE (FREE DEPLOYMENT)
+# LEGAL AI – CLOUD SAFE (NO API / NO AUTH)
 # ==========================================
 
 import streamlit as st
@@ -8,9 +8,9 @@ from pypdf import PdfReader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain.embeddings.base import Embeddings
-from langchain_community.llms import HuggingFaceHub
 
 from sentence_transformers import SentenceTransformer
+import numpy as np
 
 # --------------------------------------------------
 # PAGE CONFIG
@@ -24,22 +24,18 @@ st.set_page_config(
 # --------------------------------------------------
 # SESSION STATE
 # --------------------------------------------------
-if "chat" not in st.session_state:
-    st.session_state.chat = []
+if "vectorstore" not in st.session_state:
+    st.session_state.vectorstore = None
 
 # --------------------------------------------------
-# THEME (AUTO – STREAMLIT SAFE)
+# UI STYLE (AUTO THEME SAFE)
 # --------------------------------------------------
 st.markdown("""
 <style>
-.stApp {
-    background-color: var(--background-color);
-    color: var(--text-color);
-}
 .card {
     background: var(--secondary-background-color);
-    border-radius: 14px;
     padding: 20px;
+    border-radius: 14px;
     margin-top: 20px;
 }
 .answer {
@@ -55,11 +51,11 @@ st.markdown("""
 # HEADER
 # --------------------------------------------------
 st.markdown(
-    "<h1 style='text-align:center;'>⚖️ Legal Document Analysis & Q&A (RAG)</h1>",
+    "<h1 style='text-align:center;'>⚖️ Legal Document Analysis & Q&A</h1>",
     unsafe_allow_html=True
 )
 st.markdown(
-    "<p style='text-align:center;'>Cloud-Safe Legal AI using Retrieval-Augmented Generation</p>",
+    "<p style='text-align:center;'>Cloud-Safe RAG without API Keys</p>",
     unsafe_allow_html=True
 )
 
@@ -73,24 +69,10 @@ files = st.sidebar.file_uploader(
     accept_multiple_files=True
 )
 
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-### ✅ Enabled Features
-• Legal PDF analysis  
-• Document-based Q&A  
-• RAG with FAISS  
-• Free-tier safe deployment  
-
-### ❌ Removed for Cloud Safety
-• Voice input/output  
-• OS-level access  
-• Threads & background tasks  
-""")
-
 # --------------------------------------------------
-# EMBEDDINGS (CLOUD SAFE)
+# EMBEDDINGS
 # --------------------------------------------------
-class HFEmbeddings(Embeddings):
+class LocalEmbeddings(Embeddings):
     def __init__(self):
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
 
@@ -101,21 +83,29 @@ class HFEmbeddings(Embeddings):
         return self.model.encode([text])[0].tolist()
 
 # --------------------------------------------------
-# BUILD RAG (HUGGINGFACE HUB – SAFE)
+# BUILD VECTOR STORE
 # --------------------------------------------------
-@st.cache_resource
-def build_rag(chunks, meta):
-    vector_db = FAISS.from_texts(chunks, HFEmbeddings(), meta)
-
-    llm = HuggingFaceHub(
-        repo_id="google/flan-t5-small",
-        model_kwargs={"temperature": 0.3, "max_length": 256}
+def build_vectorstore(texts, metadata):
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=800,
+        chunk_overlap=150
     )
 
-    return RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=vector_db.as_retriever()
-    )
+    chunks, metas = [], []
+    for text, meta in zip(texts, metadata):
+        for chunk in splitter.split_text(text):
+            chunks.append(chunk)
+            metas.append(meta)
+
+    return FAISS.from_texts(chunks, LocalEmbeddings(), metas)
+
+# --------------------------------------------------
+# SIMPLE ANSWER (EXTRACTIVE – SAFE)
+# --------------------------------------------------
+def answer_question(question, vectorstore):
+    docs = vectorstore.similarity_search(question, k=3)
+    combined = "\n\n".join([doc.page_content for doc in docs])
+    return combined[:1200]  # safe output limit
 
 # --------------------------------------------------
 # MAIN APP
@@ -126,39 +116,25 @@ if files:
     for f in files:
         reader = PdfReader(f)
         for page in reader.pages:
-            content = page.extract_text()
-            if content:
-                texts.append(content)
+            text = page.extract_text()
+            if text:
+                texts.append(text)
                 metas.append({"source": f.name})
 
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=150
-    )
+    if st.session_state.vectorstore is None:
+        with st.spinner("Indexing documents..."):
+            st.session_state.vectorstore = build_vectorstore(texts, metas)
 
-    chunks, meta = [], []
-    for t, m in zip(texts, metas):
-        for c in splitter.split_text(t):
-            chunks.append(c)
-            meta.append(m)
-
-    qa = build_rag(chunks, meta)
-
-    question = st.text_input("Ask a legal question based on the uploaded documents")
+    question = st.text_input("Ask a legal question")
 
     if question:
-        with st.spinner("Analyzing legal documents…"):
-            result = qa(question)["result"]
-
-        st.session_state.chat.append((question, result))
-
-    if st.session_state.chat:
-        q, a = st.session_state.chat[-1]
+        with st.spinner("Searching documents..."):
+            answer = answer_question(question, st.session_state.vectorstore)
 
         st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown(f"**Question:** {q}")
-        st.markdown(f"<div class='answer'>{a}</div>", unsafe_allow_html=True)
+        st.markdown(f"**Question:** {question}")
+        st.markdown(f"<div class='answer'>{answer}</div>", unsafe_allow_html=True)
         st.markdown("</div>", unsafe_allow_html=True)
 
 else:
-    st.info("📂 Upload legal PDF documents to start analysis.")
+    st.info("📂 Upload legal PDF documents to begin.")
