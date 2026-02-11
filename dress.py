@@ -1,6 +1,6 @@
 # ==========================================
 # LEGAL DOCUMENT ANALYSIS & Q&A USING RAG
-# FINAL STABLE STREAMLIT CLOUD VERSION
+# STREAMLIT CLOUD – FINAL STABLE VERSION
 # ==========================================
 
 import streamlit as st
@@ -15,7 +15,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_community.llms import HuggingFaceEndpoint
 from langchain.embeddings.base import Embeddings
-from langchain.prompts import PromptTemplate
 
 from sentence_transformers import SentenceTransformer
 
@@ -35,7 +34,7 @@ if "chat" not in st.session_state:
     st.session_state.chat = []
 
 # --------------------------------------------------
-# UI STYLES (THEME SAFE)
+# UI STYLES
 # --------------------------------------------------
 st.markdown("""
 <style>
@@ -59,7 +58,7 @@ st.markdown("""
 # HEADER
 # --------------------------------------------------
 st.markdown("<h1 style='text-align:center;'>⚖️ Legal Document Analysis & Q&A</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Cloud Stable)</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Streamlit Cloud Stable)</p>", unsafe_allow_html=True)
 
 # --------------------------------------------------
 # SIDEBAR
@@ -85,7 +84,7 @@ class HFEmbeddings(Embeddings):
         return self.model.encode([text])[0].tolist()
 
 # --------------------------------------------------
-# LOAD LLM (HUGGINGFACE API – NO PIPELINES)
+# LOAD LLM (HUGGINGFACE API – CLOUD SAFE)
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def load_llm():
@@ -110,12 +109,14 @@ def build_rag(chunks, meta):
     retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
     llm = load_llm()
 
-    prompt = PromptTemplate(
-        input_variables=["context", "question"],
-        template="""
+    def qa_function(question: str):
+        docs = retriever.get_relevant_documents(question)
+        context = "\n\n".join(d.page_content for d in docs)
+
+        prompt = f"""
 You are a legal assistant.
 Answer the question strictly using the given context.
-If the answer is not present, say "Not found in the provided documents."
+If the answer is not found in the context, say "Not found in the provided documents."
 
 Context:
 {context}
@@ -125,18 +126,7 @@ Question:
 
 Answer:
 """
-    )
-
-    def qa_function(question: str):
-        docs = retriever.get_relevant_documents(question)
-        context = "\n\n".join(d.page_content for d in docs)
-
-        final_prompt = prompt.format(
-            context=context,
-            question=question
-        )
-
-        return llm.invoke(final_prompt)
+        return llm.invoke(prompt)
 
     return qa_function
 
