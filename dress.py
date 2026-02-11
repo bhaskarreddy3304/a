@@ -1,6 +1,6 @@
 # ==========================================
 # LEGAL DOCUMENT ANALYSIS & Q&A USING RAG
-# STREAMLIT CLOUD – FINAL FIXED VERSION
+# STREAMLIT CLOUD – FINAL STABLE VERSION
 # ==========================================
 
 import streamlit as st
@@ -16,12 +16,6 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.llms import HuggingFacePipeline
 from langchain.chains import RetrievalQA
 from langchain.embeddings.base import Embeddings
-
-from transformers import (
-    AutoTokenizer,
-    AutoModelForSeq2SeqLM,
-    Text2TextGenerationPipeline
-)
 
 from sentence_transformers import SentenceTransformer
 
@@ -65,14 +59,14 @@ st.markdown("""
 # HEADER
 # --------------------------------------------------
 st.markdown("<h1 style='text-align:center;'>⚖️ Legal Document Analysis & Q&A</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Cloud Stable)</p>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>RAG-based Legal AI (Streamlit Cloud Stable)</p>", unsafe_allow_html=True)
 
 # --------------------------------------------------
 # SIDEBAR
 # --------------------------------------------------
 st.sidebar.header("📂 Upload Legal PDFs")
 files = st.sidebar.file_uploader(
-    "Upload PDF files",
+    "Upload one or more PDF files",
     type=["pdf"],
     accept_multiple_files=True
 )
@@ -91,20 +85,17 @@ class HFEmbeddings(Embeddings):
         return self.model.encode([text])[0].tolist()
 
 # --------------------------------------------------
-# LOAD LLM (SAFE FOR PYTHON 3.13)
+# LOAD LLM (NO TRANSFORMERS IMPORT ISSUES)
 # --------------------------------------------------
 @st.cache_resource(show_spinner=True)
 def load_llm():
-    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-small")
-    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-small")
-
-    pipe = Text2TextGenerationPipeline(
-        model=model,
-        tokenizer=tokenizer,
-        max_new_tokens=256
+    return HuggingFacePipeline.from_model_id(
+        model_id="google/flan-t5-small",
+        task="text2text-generation",
+        pipeline_kwargs={
+            "max_new_tokens": 256
+        }
     )
-
-    return HuggingFacePipeline(pipeline=pipe)
 
 # --------------------------------------------------
 # BUILD RAG PIPELINE
