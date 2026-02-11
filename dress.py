@@ -10,11 +10,10 @@ from pypdf import PdfReader
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
-
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain_community.vectorstores import FAISS
-from langchain_community.llms import HuggingFacePipeline
-from langchain.chains import RetrievalQA
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.llms import HuggingFaceEndpoint
 from langchain.embeddings.base import Embeddings
 
 from sentence_transformers import SentenceTransformer
