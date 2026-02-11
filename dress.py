@@ -1,16 +1,40 @@
+# ==========================================
+# LEGAL AI – FULL FEATURE SAFE DEPLOYMENT
+# ==========================================
+
 import streamlit as st
-import numpy as np
+import io
+import os
+import time
+import threading
+
+# ---------- SAFE VOICE IMPORT ----------
+VOICE_AVAILABLE = True
+try:
+    import speech_recognition as sr
+    import pyttsx3
+except:
+    VOICE_AVAILABLE = False
+
 from pypdf import PdfReader
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS
+from langchain_community.llms import HuggingFacePipeline
+from langchain.chains import RetrievalQA
+from langchain.embeddings.base import Embeddings
+
+from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 from sentence_transformers import SentenceTransformer
-from sklearn.neighbors import NearestNeighbors
-from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
-import torch
 
 # --------------------------------------------------
 # PAGE CONFIG
 # --------------------------------------------------
 st.set_page_config(
-    page_title="Legal AI – Voice Enabled",
+    page_title="Legal AI – RAG",
     page_icon="⚖️",
     layout="wide"
 )
@@ -21,175 +45,180 @@ st.set_page_config(
 if "chat" not in st.session_state:
     st.session_state.chat = []
 
+if "speaking" not in st.session_state:
+    st.session_state.speaking = False
+
 # --------------------------------------------------
-# UI STYLE
+# UI STYLE (AUTO THEME SAFE)
 # --------------------------------------------------
 st.markdown("""
 <style>
-html, body, .stApp { background-color:#0b0f19; color:#e5e7eb; }
-h1, h2 { color:#e5e7eb; }
-input, textarea {
-    background:#020617!important;
-    color:#e5e7eb!important;
-    border:1px solid #6366f1!important;
+.card {
+    background-color: var(--secondary-background-color);
+    border-radius: 16px;
+    padding: 20px;
+    margin-top: 20px;
 }
-.user { background:#1e293b; padding:12px; border-radius:10px; margin:8px 0; }
-.bot  { background:#020617; padding:12px; border-radius:10px; border-left:4px solid #6366f1; }
-.source { font-size:13px; color:#94a3b8; }
-.btn {
-    background:#6366f1; color:white;
-    padding:8px 14px; border-radius:8px;
-    border:none; cursor:pointer;
+.answer {
+    background-color: rgba(16,163,127,0.12);
+    border-left: 4px solid #10a37f;
+    padding: 16px;
+    border-radius: 10px;
+    line-height: 1.6;
 }
-footer { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
 # --------------------------------------------------
 # HEADER
 # --------------------------------------------------
-st.markdown("<h1 style='text-align:center;'>⚖️ Legal AI – Speech Enabled Q&A</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align:center;'>PDF RAG • Voice Input • Streamlit Cloud Safe</p>", unsafe_allow_html=True)
-
-# --------------------------------------------------
-# LOAD MODELS (100% SAFE)
-# --------------------------------------------------
-@st.cache_resource
-def load_embedder():
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-@st.cache_resource
-def load_llm():
-    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
-    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
-    model.eval()
-    return tokenizer, model
-
-embedder = load_embedder()
-tokenizer, model = load_llm()
+st.markdown("<h1 style='text-align:center;'>⚖️ Legal Document Analysis & Q&A using RAG</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center;'>Voice-Enabled AI Assistant (Cloud Safe)</p>", unsafe_allow_html=True)
 
 # --------------------------------------------------
 # SIDEBAR
 # --------------------------------------------------
 st.sidebar.header("📂 Upload Legal PDFs")
 files = st.sidebar.file_uploader(
-    "Upload one or more PDF files",
+    "Upload PDFs",
     type=["pdf"],
     accept_multiple_files=True
 )
 
-# --------------------------------------------------
-# TEXT SPLITTER
-# --------------------------------------------------
-def split_text(text, size=800, overlap=150):
-    chunks = []
-    start = 0
-    while start < len(text):
-        chunks.append(text[start:start + size])
-        start += size - overlap
-    return chunks
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🎙 Voice Status")
+st.sidebar.success("Enabled" if VOICE_AVAILABLE else "Disabled (Cloud Mode)")
 
 # --------------------------------------------------
-# VECTOR INDEX
+# EMBEDDINGS
 # --------------------------------------------------
-@st.cache_resource(show_spinner=True)
-def build_index(files):
-    texts, sources = [], []
+class HFEmbeddings(Embeddings):
+    def __init__(self):
+        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+
+    def embed_documents(self, texts):
+        return self.model.encode(texts).tolist()
+
+    def embed_query(self, text):
+        return self.model.encode([text])[0].tolist()
+
+# --------------------------------------------------
+# BUILD RAG
+# --------------------------------------------------
+@st.cache_resource
+def build_rag(chunks, meta):
+    db = FAISS.from_texts(chunks, HFEmbeddings(), meta)
+
+    tokenizer = AutoTokenizer.from_pretrained("google/flan-t5-base")
+    model = AutoModelForSeq2SeqLM.from_pretrained("google/flan-t5-base")
+
+    pipe = pipeline(
+        "text2text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        max_new_tokens=300
+    )
+
+    return RetrievalQA.from_chain_type(
+        llm=HuggingFacePipeline(pipeline=pipe),
+        retriever=db.as_retriever()
+    )
+
+# --------------------------------------------------
+# VOICE FUNCTIONS (SAFE)
+# --------------------------------------------------
+def voice_input():
+    if not VOICE_AVAILABLE:
+        return ""
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        audio = r.listen(source)
+    try:
+        return r.recognize_google(audio)
+    except:
+        return ""
+
+def speak(text):
+    if not VOICE_AVAILABLE:
+        return
+    engine = pyttsx3.init()
+    engine.say(text)
+    engine.runAndWait()
+
+# --------------------------------------------------
+# PDF GENERATION
+# --------------------------------------------------
+def generate_pdf(q, a):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = [
+        Paragraph("<b>LEGAL AI REPORT</b>", styles["Title"]),
+        Paragraph("<br/><b>Question:</b>", styles["Heading2"]),
+        Paragraph(q, styles["Normal"]),
+        Paragraph("<br/><b>Answer:</b>", styles["Heading2"]),
+        Paragraph(a, styles["Normal"]),
+    ]
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
+
+# --------------------------------------------------
+# MAIN
+# --------------------------------------------------
+if files:
+    texts, metas = [], []
 
     for f in files:
         reader = PdfReader(f)
-        full_text = ""
         for page in reader.pages:
             txt = page.extract_text()
             if txt:
-                full_text += txt
+                texts.append(txt)
+                metas.append({"source": f.name})
 
-        chunks = split_text(full_text)
-        texts.extend(chunks)
-        sources.extend([f.name] * len(chunks))
+    splitter = RecursiveCharacterTextSplitter(800, 150)
 
-    embeddings = embedder.encode(texts)
-    nn = NearestNeighbors(n_neighbors=4, metric="cosine")
-    nn.fit(embeddings)
+    chunks, meta = [], []
+    for t, m in zip(texts, metas):
+        for c in splitter.split_text(t):
+            chunks.append(c)
+            meta.append(m)
 
-    return nn, texts, sources
-
-# --------------------------------------------------
-# BROWSER SPEECH (CLOUD SAFE)
-# --------------------------------------------------
-st.markdown("""
-<script>
-function startDictation() {
-    if (!('webkitSpeechRecognition' in window)) {
-        alert("Speech recognition not supported");
-        return;
-    }
-    const r = new webkitSpeechRecognition();
-    r.lang = "en-IN";
-    r.onresult = e => {
-        document.getElementById("speech_input").value = e.results[0][0].transcript;
-    };
-    r.start();
-}
-
-function speakText(text) {
-    const msg = new SpeechSynthesisUtterance(text);
-    msg.lang = "en-IN";
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(msg);
-}
-</script>
-""", unsafe_allow_html=True)
-
-# --------------------------------------------------
-# MAIN APP
-# --------------------------------------------------
-if files:
-    nn, texts, sources = build_index(files)
+    qa = build_rag(chunks, meta)
 
     col1, col2 = st.columns([6, 1])
+
     with col1:
-        question = st.text_input("Ask a legal question", key="speech_input")
+        question = st.text_input("Ask a legal question")
+
     with col2:
-        st.markdown(
-            '<button class="btn" onclick="startDictation()">🎤 Speak</button>',
-            unsafe_allow_html=True
-        )
+        if st.button("🎤") and VOICE_AVAILABLE:
+            spoken = voice_input()
+            if spoken:
+                question = spoken
 
     if question:
-        with st.spinner("Analyzing legal documents..."):
-            q_emb = embedder.encode([question])
-            _, idxs = nn.kneighbors(q_emb)
+        with st.spinner("Analyzing documents..."):
+            answer = qa(question)["result"]
+        st.session_state.chat.append((question, answer))
 
-            context = " ".join([texts[i] for i in idxs[0]])
-            prompt = (
-                "Answer the legal question clearly and concisely.\n\n"
-                f"Context:\n{context}\n\nQuestion:\n{question}"
-            )
+    if st.session_state.chat:
+        q, a = st.session_state.chat[-1]
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown(f"**Question:** {q}")
+        st.markdown(f"<div class='answer'>{a}</div>", unsafe_allow_html=True)
 
-            inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
-            with torch.no_grad():
-                outputs = model.generate(
-                    **inputs,
-                    max_new_tokens=300,
-                    temperature=0.7
-                )
+        if st.button("🔊 Read Answer") and VOICE_AVAILABLE:
+            threading.Thread(target=speak, args=(a,), daemon=True).start()
 
-            answer = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-        st.session_state.chat.append((question, answer, idxs[0]))
-
-    # CHAT HISTORY
-    for q, a, idxs in reversed(st.session_state.chat):
-        st.markdown(f"<div class='user'><b>Q:</b> {q}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='bot'>{a}</div>", unsafe_allow_html=True)
-
-        for s in set(sources[i] for i in idxs):
-            st.markdown(f"<div class='source'>Source: {s}</div>", unsafe_allow_html=True)
-
-        st.markdown(
-            f'<button class="btn" onclick="speakText(`{a[:1500]}`)">🔊 Read Answer</button>',
-            unsafe_allow_html=True
+        st.download_button(
+            "📄 Download PDF",
+            generate_pdf(q, a),
+            "Legal_AI_Report.pdf",
+            "application/pdf"
         )
+        st.markdown("</div>", unsafe_allow_html=True)
+
 else:
-    st.info("⬅️ Upload legal PDF documents to begin.")
+    st.info("Upload legal documents to begin.")
